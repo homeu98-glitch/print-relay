@@ -166,8 +166,10 @@ object JobRunner {
 
     /**
      * Printer resolution order:
-     *  1. row.printer (jsonb snapshot from server, most authoritative)
-     *  2. claim response printers array (match by printer_id → printer_name)
+     *  0. row.printer (jsonb snapshot from server — 未寫入，保留兼容)
+     *  1. **web POS 路由配置**（問題二 / docs/98）：job.printer_id（web uid）== RoutingPrinter.id，
+     *     直接 match 到配置機嘅 IP:port，權威揀機，取代舊 fallback「第一個開 9100 嘅機」（H6）
+     *  2. claim response printers array (match by printer_id → printer_name，目前恒為 [])
      *  3. Local LAN hub devices (match by name → key)
      *  4. Fallback: first available LAN device
      */
@@ -183,6 +185,25 @@ object JobRunner {
 
         val pid = row.optString("printer_id").takeIf { it.isNotBlank() }
         val pname = row.optString("printer_name").takeIf { it.isNotBlank() }
+
+        // 問題二（docs/98）：用 web POS 同步過嚟嘅路由配置做權威揀機。
+        // job.printer_id（web uid）== RoutingPrinter.id，直接 match 到配置機嘅 IP:port。
+        // 取代舊 fallback「第一個開 9100 嘅機」（H6）。配置機 IP 空白就跌落本地發現匹配。
+        val routed = RelayState.deviceConfigPrinters
+            .firstOrNull { it.id == pid && it.enabled }
+        if (routed != null && !routed.ipAddress.isNullOrBlank()) {
+            return PrinterCfgDto(
+                id = routed.id,
+                name = routed.name,
+                connectionType = "lan",
+                ipAddress = routed.ipAddress,
+                lanPort = routed.lanPort ?: 9100,
+                paperSize = prefs.defaultPaperSize,
+                usbLabel = null,
+                charset = null,
+            )
+        }
+
         if (printers.isNotEmpty()) {
             val list = printers.map { PrinterCfgDto.fromJson(it) }
             list.firstOrNull { pid != null && it.id == pid }?.let { return it }

@@ -6,6 +6,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
+import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 
 /**
@@ -210,6 +211,43 @@ class RelayApi {
             .put("agentId", agentId)
         if (!storeId.isNullOrBlank()) payload.put("storeId", storeId)
         return post("$baseUrl/api/pos/print-agent/heartbeat", agentId, token, payload.toString())
+    }
+
+    /**
+     * 拉呢間店嘅打印機路由配置（web POS `pos_device_configs.printers`）。
+     * 用配對後嘅 storeId 過濾，解決「路由配置只存在 POS 端、Hub 睇唔到」嘅問題（docs/98 問題二）。
+     * 返回空 list = 呢間店冇配置；返回 null = 網絡／HTTP 錯（ caller 應保留舊值）。
+     */
+    fun fetchDeviceConfig(baseUrl: String, storeId: String): List<RoutingPrinter>? {
+        val url = "${baseUrl.trim().trimEnd('/')}/api/pos/device-config?storeId=${
+            URLEncoder.encode(storeId, "UTF-8")
+        }"
+        val req = Request.Builder().url(url).get().build()
+        return try {
+            client.newCall(req).execute().use { resp ->
+                val text = resp.body?.string().orEmpty()
+                if (!resp.isSuccessful) return null
+                val o = runCatching { JSONObject(text) }.getOrNull() ?: return null
+                val cfg = o.optJSONObject("deviceConfig") ?: return emptyList()
+                val arr = cfg.optJSONArray("printers") ?: return emptyList()
+                (0 until arr.length()).mapNotNull { i ->
+                    runCatching {
+                        val p = arr.getJSONObject(i)
+                        RoutingPrinter(
+                            id = p.optString("id").takeIf { it.isNotBlank() } ?: "?",
+                            name = p.optString("name").takeIf { it.isNotBlank() } ?: "(未命名)",
+                            role = p.optString("role").takeIf { it.isNotBlank() } ?: "?",
+                            zoneId = p.optString("zoneId").takeIf { it.isNotBlank() },
+                            ipAddress = p.optString("ipAddress").takeIf { it.isNotBlank() },
+                            lanPort = if (p.has("lanPort") && !p.isNull("lanPort")) p.optInt("lanPort") else null,
+                            enabled = if (p.has("enabled")) p.optBoolean("enabled", true) else true,
+                        )
+                    }.getOrNull()
+                }
+            }
+        } catch (e: Exception) {
+            null
+        }
     }
 
     private fun post(url: String, agentId: String, token: String, body: String): JSONObject? {

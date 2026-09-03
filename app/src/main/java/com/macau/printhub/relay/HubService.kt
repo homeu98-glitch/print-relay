@@ -54,6 +54,7 @@ class HubService : Service() {
 
     private var lastDrainAt = 0L
     private var lastHeartbeatAt = 0L
+    private var lastConfigFetchAt = 0L
     private var lastNotifText = ""
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -145,6 +146,13 @@ class HubService : Service() {
             lastHeartbeatAt = now
         }
 
+        // 問題二（docs/98）：定時同步 web POS 嘅打印機路由配置，令 Hub UI 睇到
+        // 「邊部機負責印咩內容」。60s 一次；用子 coroutine，唔阻塞 tick。
+        if (now - lastConfigFetchAt > CONFIG_FETCH_MS) {
+            lastConfigFetchAt = now
+            fetchDeviceConfig()
+        }
+
         RelayState.phase = if (RelayState.realtimeConnected) "online" else "offline"
         updateNotification()
     }
@@ -196,6 +204,18 @@ class HubService : Service() {
             info,
         )
         if (resp != null) RelayState.lastHeartbeatAt = System.currentTimeMillis()
+    }
+
+    /**
+     * 拉 web POS 嘅打印機路由配置（問題二：Hub 睇唔到「邊部機負責咩」）。
+     * 子 coroutine 執行網絡，完成先寫 RelayState（null = 失敗，保留舊值唔覆寫）。
+     */
+    private fun fetchDeviceConfig() {
+        val storeId = prefs.storeId ?: return
+        scope.launch {
+            val list = api.fetchDeviceConfig(BuildConfig.POS_URL, storeId)
+            if (list != null) RelayState.deviceConfigPrinters = list
+        }
     }
 
     /**
@@ -297,6 +317,7 @@ class HubService : Service() {
         private const val TICK_MS = 1_000L
         private const val RECONCILE_MS = 30_000L
         private const val HEARTBEAT_MS = 60_000L
+        private const val CONFIG_FETCH_MS = 60_000L
 
         fun start(context: Context) {
             val i = Intent(context, HubService::class.java)

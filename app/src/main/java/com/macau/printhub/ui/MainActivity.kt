@@ -66,6 +66,10 @@ class MainActivity : ComponentActivity() {
     private lateinit var btnScan: Button
     private lateinit var printersContainer: LinearLayout
 
+    // Routing config (synced from web POS, docs/98 問題二)
+    private lateinit var routingContainer: LinearLayout
+    private var lastRoutingSig: String = ""
+
     // Log
     private lateinit var logAdapter: LogAdapter
     private lateinit var etLogFilter: EditText
@@ -181,6 +185,13 @@ class MainActivity : ComponentActivity() {
             orientation = LinearLayout.VERTICAL
         }
         root.addView(printersContainer)
+
+        // Routing config section (synced from web POS — 問題二：Hub 睇唔到「邊部機負責咩」)
+        root.addView(sectionHeader("打印機路由配置（web POS）"))
+        routingContainer = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+        root.addView(routingContainer)
 
         // Log section
         root.addView(sectionHeader("列印日誌"))
@@ -305,6 +316,60 @@ class MainActivity : ComponentActivity() {
 
         // Refresh log every tick
         refreshLog()
+        refreshRouting()
+    }
+
+    /**
+     * 顯示 web POS 同步過嚟嘅打印機路由配置（問題二）。
+     * 用 signature 比對，資料冇變就唔 rebuild，避免每秒重畫（refresh() 每秒跑一次）。
+     */
+    private fun refreshRouting() {
+        val list = RelayState.deviceConfigPrinters
+        val sig = list.joinToString("|") {
+            "${it.id}:${it.name}:${it.role}:${it.zoneId}:${it.ipAddress}:${it.lanPort}:${it.enabled}"
+        }
+        if (sig == lastRoutingSig) return
+        lastRoutingSig = sig
+
+        routingContainer.removeAllViews()
+        if (list.isEmpty()) {
+            routingContainer.addView(TextView(this).apply {
+                text = "（未同步到路由配置，請確認 web POS 已設置打印機並配對同一店舖）"
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+                alpha = 0.5f
+                setPadding(0, dp(8), 0, dp(8))
+            })
+            return
+        }
+        for (p in list) {
+            val roleLabel = when (p.role) {
+                "zone" -> "分區單"
+                "receipt" -> "收據"
+                "label" -> "標籤"
+                else -> p.role
+            }
+            val summary = buildString {
+                append(p.name)
+                if (!p.ipAddress.isNullOrBlank()) append("  ${p.ipAddress}:${p.lanPort ?: 9100}")
+                append("  [${roleLabel}")
+                if (p.role == "zone" && !p.zoneId.isNullOrBlank()) append(" · 區 ${p.zoneId}")
+                append("]")
+                if (!p.enabled) append("  ⚠ 已停用")
+            }
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(0, dp(6), 0, dp(6))
+            }
+            row.addView(TextView(this).apply {
+                text = summary
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+            })
+            routingContainer.addView(row)
+            routingContainer.addView(View(this).apply {
+                setBackgroundColor(0x33FFFFFF.toInt())
+                layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 1)
+            })
+        }
     }
 
     private fun refreshLog() {

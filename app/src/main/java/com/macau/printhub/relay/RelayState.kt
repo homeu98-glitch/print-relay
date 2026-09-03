@@ -44,6 +44,14 @@ object RelayState {
     @Volatile
     var localIp: String? = null
 
+    /**
+     * 打印機路由配置（嚟自 web POS 嘅 `pos_device_configs.printers`）。
+     * Hub 配對後定時拉一次（見 HubService.fetchDeviceConfig），畀 UI 顯示
+     * 「邊部機負責印咩內容」，解決「路由配置只存在 POS 端、Hub 睇唔到」嘅排查盲點（docs/98 問題二）。
+     */
+    @Volatile
+    var deviceConfigPrinters: List<RoutingPrinter> = emptyList()
+
     fun note(msg: String) {
         lastMessage = msg
     }
@@ -69,5 +77,21 @@ object RelayState {
         lastMessage = ""
         lastPrintError = ""
         lastPrintErrorAt = 0L
+        deviceConfigPrinters = emptyList()
     }
 }
+
+/**
+ * 單一部打印機嘅路由設定（web POS 端 `DevicePrinterConfig` 嘅子集）。
+ * 只攞 Hub 顯示「邊部機負責咩」要用到嘅欄位：角色（分區/收據/標籤）、
+ * 分區 id、IP、端口、停用旗標。
+ */
+data class RoutingPrinter(
+    val id: String,
+    val name: String,
+    val role: String, // "zone" | "receipt" | "label"
+    val zoneId: String?,
+    val ipAddress: String?,
+    val lanPort: Int?,
+    val enabled: Boolean,
+)
