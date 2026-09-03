@@ -241,6 +241,7 @@ class RelayApi {
                             ipAddress = p.optString("ipAddress").takeIf { it.isNotBlank() },
                             lanPort = if (p.has("lanPort") && !p.isNull("lanPort")) p.optInt("lanPort") else null,
                             enabled = if (p.has("enabled")) p.optBoolean("enabled", true) else true,
+                            kanjiEnlarge = p.optString("kanjiEnlarge").takeIf { it.isNotBlank() },
                         )
                     }.getOrNull()
                 }

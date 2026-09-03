@@ -61,6 +61,22 @@ H4（Realtime 失敗）只會令出紙慢 30 秒，**唔會完全收唔到**。
 `JobRunner.kt:42` claim 返 0 單時 `error=null`，`HubService.drainNow()` 只在 `error != null` 或 `claimed > 0` 時寫 note。
 **「沒有單」和「claim 根本冇跑」UI 睇唔出**——排查必須靠 SQL（`pos_queue_events`）。
 
+### 2.4 ESC/POS 字型放大合約（三端必須同步，否則變形）
+`net/EscPosRenderer.kt` 嘅 `Buf` 類係唯一發字型指令嘅地方。改動前必讀 `desktop-companion/companion-server.mjs:257-343`（已實機驗證嘅權威版）。
+
+- **地雷**：Epson / Gprinter 系 `ESC ! n`（1B 21，净管 ASCII）同 `GS ! n`（1D 21，管所有字符）係**相乘唔係覆蓋**。
+  同時發 `ESC!0x30 + GS!0x30` → ASCII 變 4×4、中文 2×2 → 版面撕裂（= docs/80 B2）。
+- **size byte 值（三端一致）**：
+  - `SIZE_BYTE`（ESC!）：`s=0x00 m=0x20 l=0x30`
+  - `GS_SIZE_BYTE`（GS! nibble，`n=((h-1)<<4)|(w-1)`）：`s=0x00 m=0x01 l=0x11`
+  - `FS_SIZE_BYTE`（FS! Kanji）：`s=0x00 m=0x04 l=0x0C`
+- **每行決定放大指令**（唔好統一發）：`useGs = kanjiEnlarge != "FS!"`；
+  GS! 路線 + CJK 行 → `ESC!` 發 `0x00`（唔帶放大）、放大只由 `GS! GS_SIZE_BYTE[size]` 負責；
+  FS! 路線 → `ESC! SIZE_BYTE[size]`（ASCII）+ `FS! FS_SIZE_BYTE[size]`（中文）。
+- **行距跟縱向倍數**：`ESC 3 n`，`l`（雙高）→ 60，否則 30（docs/74 B3，防大字重疊變扁）。
+- 實機 A/B 證據：`desktop-companion/test-kanji-size.mjs`（F-2 PASS = 修正生效；F-3/F-4 FAIL = 相乘）。
+- 2026-09-03 修過：舊 `Buf` 用 `KANJI_SIZE_BYTE`（誤用 ESC! 值）且 `style()` 永遠發放大位 ESC! → 除 `s` 外全變形。
+
 ---
 
 ## 3. 流程坑（必踩過嘅）

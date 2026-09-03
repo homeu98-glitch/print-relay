@@ -201,6 +201,7 @@ object JobRunner {
                 paperSize = prefs.defaultPaperSize,
                 usbLabel = null,
                 charset = null,
+                kanjiEnlarge = routed.kanjiEnlarge,
             )
         }
 

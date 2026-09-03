@@ -18,8 +18,12 @@ object EscPosRenderer {
     private const val GS = 0x1D
     private const val LF = 0x0A
 
+    // ESC ! n — 只管 ASCII / 半形（FS! 路線用；GS! 路線唔用放大 bit）
     private val SIZE_BYTE = mapOf("s" to 0x00, "m" to 0x20, "l" to 0x30)
-    private val KANJI_SIZE_BYTE = mapOf("s" to 0x00, "m" to 0x20, "l" to 0x30)
+    // GS ! n — 標準 Epson nibble 語意：n = ((h-1)<<4)|(w-1)；s=1×1 m=2闊1高 l=2×2
+    private val GS_SIZE_BYTE = mapOf("s" to 0x00, "m" to 0x01, "l" to 0x11)
+    // FS ! n — 標準 ESC/POS Kanji 放大（FS! 路線用）：bit 0x04=雙闊 0x08=雙高 0x0C=2×2
+    private val FS_SIZE_BYTE = mapOf("s" to 0x00, "m" to 0x04, "l" to 0x0C)
 
     private fun hasCJK(s: String): Boolean {
         for (c in s) {
@@ -142,48 +146,57 @@ object EscPosRenderer {
 
     private class Buf(private val cs: Charset, kanjiEnlarge: String? = null) {
         private val out = java.io.ByteArrayOutputStream()
-        private val kanjiCmd: Int = if (kanjiEnlarge == "FS!") FS else GS
+        // docs/81 P0-A：按 kanjiEnlarge 決定 ESC! 係咪帶放大 bit。
+        // 缺省 GS! n（商頌 POS-80 等 Epson/Gprinter 系實機證實：FS! n 係 no-op，GS! n 先有效）。
+        private val useGs = kanjiEnlarge != "FS!"
         private var curSize: String = "s"
+        private var curBold: Boolean = false
         fun cmd(vararg b: Int) = apply { b.forEach { out.write(it) } }
-        fun str(s: String) = apply {
-            cmd(ESC, 0x33, if (curSize == "l") 60 else 30)
+
+        /**
+         * 每行 emit 一次字型指令（對齊 ESC ! / GS ! / FS ! 嘅相乘地雷，docs/80 B2）：
+         * - GS! 路線 + CJK 行：ESC ! 唔帶放大 bit（避免同 GS ! 相乘 → 變形）
+         * - 其他情況：ESC ! 帶 SIZE_BYTE[size] 放大（ASCII / 半形）
+         * - CJK 行：FS& 入 Kanji mode 後，按路線發 GS! / FS! 對應 size byte
+         * - 行距跟縱向倍數（l 雙高 → 行距 double，避免大字重疊變扁，docs/74 B3）
+         */
+        private fun emitLine(s: String, withLf: Boolean, inverse: Boolean = false) {
             val cjk = hasCJK(s)
-            if (cjk) cmd(FS, 0x26)
-            if (cjk) cmd(kanjiCmd, 0x21, KANJI_SIZE_BYTE[curSize] ?: 0x00)
-            out.write(encode(s, cs))
-            if (cjk) cmd(FS, 0x2E)
-        }
-        fun line(s: String = "", inverse: Boolean = false) = apply {
+            val escByte = if (useGs && cjk) 0x00 else (SIZE_BYTE[curSize] ?: 0x00)
+            cmd(ESC, 0x21, escByte)
+            cmd(ESC, 0x45, if (curBold) 1 else 0)
             cmd(ESC, 0x33, if (curSize == "l") 60 else 30)
-            val cjk = hasCJK(s)
-            if (cjk) cmd(FS, 0x26)
-            if (cjk) cmd(kanjiCmd, 0x21, KANJI_SIZE_BYTE[curSize] ?: 0x00)
+            if (cjk) {
+                cmd(FS, 0x26) // FS & 入 Kanji mode
+                if (useGs) cmd(GS, 0x21, GS_SIZE_BYTE[curSize] ?: 0x00)
+                else cmd(FS, 0x21, FS_SIZE_BYTE[curSize] ?: 0x00)
+            }
             if (inverse) cmd(ESC, 0x7B, 0x01)
             out.write(encode(s, cs))
             if (inverse) cmd(ESC, 0x7B, 0x00)
-            out.write(LF)
-            if (cjk) cmd(FS, 0x2E)
+            if (cjk) cmd(FS, 0x2E) // FS . 出 Kanji mode（同 companion textLine：先出 mode 再 LF）
+            if (withLf) out.write(LF)
         }
+
+        fun str(s: String) = apply { emitLine(s, false) }
+        fun line(s: String = "", inverse: Boolean = false) = apply { emitLine(s, true, inverse) }
         fun bytes(ba: ByteArray) = apply { out.write(ba) }
         fun toBytes(): ByteArray = out.toByteArray()
 
-        fun style(size: String, bold: Boolean) = apply {
-            curSize = size
-            cmd(ESC, 0x21, SIZE_BYTE[size] ?: 0x00)
-            cmd(ESC, 0x45, if (bold) 1 else 0)
-        }
+        // style() 淨記錄 size/bold，真正 emit 留喺 emitLine（每行決定，避免相乘）
+        fun style(size: String, bold: Boolean) = apply { curSize = size; curBold = bold }
         fun align(a: String) = apply {
             val code = when (a) { "center" -> 1; "right" -> 2; else -> 0 }
             cmd(ESC, 0x61, code)
         }
         fun reset() = apply {
-            curSize = "s"
+            curSize = "s"; curBold = false
             cmd(ESC, 0x45, 0x00)
             cmd(ESC, 0x61, 0x00)
         }
 
         fun resetMagnify() = apply {
-            curSize = "s"
+            curSize = "s"; curBold = false
             cmd(GS, 0x21, 0x00)
             cmd(ESC, 0x21, 0x00)
             cmd(ESC, 0x33, 30)

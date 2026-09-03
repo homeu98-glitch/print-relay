@@ -94,4 +94,6 @@ data class RoutingPrinter(
     val ipAddress: String?,
     val lanPort: Int?,
     val enabled: Boolean,
+    /** 中文倍大指令：標準 ESC/POS 機 FS!；商頌 POS-80 等 GS!。檢索引 EscPosRenderer 嘅 useGs。 */
+    val kanjiEnlarge: String? = null,
 )
