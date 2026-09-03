@@ -9,44 +9,9 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-
-    <!-- docs/96 §10：中繼機要 7×24 喺線 -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
-    <!-- Doze 白名單：唔加嘅話鎖屏一陣 WebSocket 就斷。Sunmi 唔經 Play 派版，無政策問題。
-         runtime 用 ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS 開系統對話框由店員確認。 -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
-
-    <!-- 藍牙打印（Android 12+ 需要 RUNTIME 授權 BLUETOOTH_SCAN / BLUETOOTH_CONNECT） -->
-    <uses-permission
-        android:name="android.permission.BLUETOOTH"
-        android:maxSdkVersion="30" />
-    <uses-permission
-        android:name="android.permission.BLUETOOTH_ADMIN"
-        android:maxSdkVersion="30" />
-    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
-    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
-
-    <!-- USB Host：外接 ESC/POS 打印機（required=false 令唔支援嘅機都裝到 app）。
-         printer-lib AAR 會 declare required=true，merge 嗰陣會取嚴嘅值，
-         所以呢度用 tools:replace 強行 keep false，等無 USB host 嘅普通手機都裝到／開到。 -->
-    <uses-feature
-        android:name="android.hardware.usb.host"
-        android:required="false"
-        tools:replace="required" />
-
-    <!--
-      docs/96 §8：targetSdk ≥ 30 起，Android 11 套件可見性會擋住 AIDL bindService。
-      冇呢段 <queries>，InnerPrinterManager.bindService() 會**靜默失敗**（唔拋 exception，
-      只係永遠收唔到 onConnected）→ 內置打印機當「唔存在」。Sunmi V2 係 API 25，
-      本身唔受可見性限制，但同一個 APK 也會裝去新機，所以必須宣告。
-    -->
-    <queries>
-        <package android:name="woyou.aidlservice.jiuiv5" />
-        <intent>
-            <action android:name="woyou.aidlservice.jiuiv5.IWoyouService" />
-        </intent>
-    </queries>
 
     <application
         android:name=".App"
@@ -55,50 +20,29 @@
         android:label="@string/app_name"
         android:networkSecurityConfig="@xml/network_security_config"
         android:supportsRtl="true"
-        android:theme="@style/Theme.PosPrinterDemo"
+        android:theme="@android:style/Theme.Material.Light"
         android:usesCleartextTraffic="true">
+
         <activity
-            android:name=".MainActivity"
+            android:name=".ui.MainActivity"
             android:exported="true"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-            <!-- 插上 USB 打印機時彈授權 / 自動加機 -->
-            <intent-filter>
-                <action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" />
-            </intent-filter>
-            <meta-data
-                android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED"
-                android:resource="@xml/device_filter" />
         </activity>
 
+        <!-- 雲端中繼 + 本機 HTTP 服務常駐（iPad / 任何 web 端 → Supabase → 呢部機 → LAN 印表機） -->
         <service
-            android:name=".hub.PrintHubService"
+            android:name=".relay.HubService"
             android:exported="false"
             android:foregroundServiceType="specialUse">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="LAN HTTP print hub for offline POS printing" />
+                android:value="LAN print relay hub (receives print jobs via Supabase + local HTTP)" />
         </service>
 
-        <!-- docs/96 §7：雲端中繼常駐服務（iPad / 任何 web 端 → Supabase → 呢部機 → 打印機） -->
-        <service
-            android:name=".relay.RelayService"
-            android:exported="false"
-            android:foregroundServiceType="specialUse">
-            <property
-                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="Cloud print relay for web POS (receives print jobs via Supabase)" />
-        </service>
-
-        <activity
-            android:name=".relay.RelayActivity"
-            android:exported="false"
-            android:label="@string/relay_title" />
-
-        <!-- 開機自動起身：掉電重啟後唔使人手開 app（Sunmi ROM 多數允許） -->
         <receiver
             android:name=".relay.BootReceiver"
             android:exported="false">

@@ -1,1 +1,2 @@
-# Demo APK — no special rules
+# Add project specific ProGuard rules here.
+-keep class com.macau.printhub.** { *; }

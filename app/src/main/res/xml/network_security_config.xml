@@ -1,4 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <base-config cleartextTrafficPermitted="true" />
+    <!-- POS 係 HTTPS；本機 Hub 需要打 LAN HTTP（印表機 9100 係 raw TCP，冇 http），
+         但畀 macau-pos 直連本機 HTTP 服務時可能用 http://LAN-IP:8787 → 允許明文。 -->
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
 </network-security-config>
