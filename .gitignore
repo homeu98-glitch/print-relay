@@ -1,0 +1,16 @@
+/.gradle/
+/.kotlin/
+/build/
+/app/build/
+/local.properties
+/.idea/
+*.iml
+.DS_Store
+/captures/
+*.apk
+*.ap_
+*.aab
+# WorkBuddy 專案資料（memory 等）—— 係本機工作數據，唔入版控
+/.workbuddy-ai/
+# 人手跑 build 時 dump 落嚟嘅 log
+build-log*.txt

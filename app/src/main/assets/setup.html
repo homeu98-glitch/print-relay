@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+  <title>設定印表機</title>
+  <style>
+    :root {
+      --bg: #0f1419; --panel: #1a222c; --panel2: #232d3a; --line: #334155;
+      --text: #e8eef6; --muted: #94a3b8; --ok: #34d399; --warn: #fbbf24; --danger: #f87171;
+      --front: #60a5fa; --bar: #a78bfa; --kitchen: #fb923c;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; font-family: sans-serif; color: var(--text);
+      background: var(--bg); padding: 12px 12px 36px;
+    }
+    h1 { font-size: 1.15rem; margin: 0 0 4px; }
+    .hint { color: var(--muted); font-size: 0.78rem; margin: 0 0 10px; line-height: 1.4; }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--line); border-radius: 10px; padding: 10px; margin-bottom: 8px;
+    }
+    h2 { font-size: 0.92rem; margin: 0 0 6px; }
+    .row { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+    button, input, select {
+      font: inherit; border-radius: 8px; border: 1px solid var(--line);
+      background: var(--panel2); color: var(--text); padding: 8px 10px;
+    }
+    button { cursor: pointer; }
+    button.primary { background: #0ea5e9; border-color: #0284c7; color: #041018; font-weight: 700; }
+    button.danger { color: var(--danger); border-color: #7f1d1d; background: transparent; }
+    input, select { width: 100%; background: #0b1220; }
+    .status { color: var(--ok); font-size: 0.78rem; min-height: 1em; margin-top: 4px; }
+    .device { background: var(--panel2); border-radius: 8px; padding: 8px; margin-bottom: 6px; }
+    .mac { font-family: monospace; font-size: 0.75rem; color: #cbd5e1; }
+    .pill {
+      display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 0.72rem; font-weight: 700;
+    }
+    .pill.front { background: rgba(96,165,250,.15); color: var(--front); }
+    .pill.bar { background: rgba(167,139,250,.15); color: var(--bar); }
+    .pill.kitchen { background: rgba(251,146,60,.15); color: var(--kitchen); }
+    .pill.none { background: rgba(148,163,184,.12); color: var(--muted); }
+    label.check { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 0.8rem; }
+  </style>
+</head>
+<body>
+  <h1>設定印表機</h1>
+  <p class="hint">此頁由 POS Printer Demo 提供（HTTP）。掃描區網後把設備綁到前台／水吧／廚房，Hub 會記住並負責出單。</p>
+
+  <div class="card">
+    <h2>區網掃描</h2>
+    <input id="subnet" placeholder="網段前綴，例如 192.168.31" />
+    <div class="row">
+      <button type="button" class="primary" id="btnScan">掃描區網</button>
+      <button type="button" class="danger" id="btnClear">清除綁定</button>
+    </div>
+    <label class="check"><input type="checkbox" id="identify" /> 掃描時對 9100 印識別頁</label>
+    <div class="status" id="status">連線中…</div>
+  </div>
+
+  <div class="card">
+    <h2>手動新增</h2>
+    <input id="manualIp" placeholder="印表機 IP" />
+    <div style="height:6px"></div>
+    <input id="manualName" placeholder="名稱（可選）" />
+    <div style="height:6px"></div>
+    <select id="manualService">
+      <option value="">未指定</option>
+      <option value="front">前台</option>
+      <option value="bar">水吧</option>
+      <option value="kitchen">廚房</option>
+    </select>
+    <div class="row"><button type="button" id="btnAdd">新增並探測</button></div>
+  </div>
+
+  <div class="card">
+    <h2>已發現 / 已綁定</h2>
+    <div id="list"></div>
+  </div>
+
+  <div class="row">
+    <button type="button" class="primary" id="btnDone" style="flex:1">完成，回到出單</button>
+  </div>
+
+  <script>
+    const SERVICES = {
+      front: { label: '前台', cls: 'front' },
+      bar: { label: '水吧', cls: 'bar' },
+      kitchen: { label: '廚房', cls: 'kitchen' },
+    };
+    const params = new URLSearchParams(location.search);
+    const returnUrl = params.get('return') || 'https://ericchang1015.github.io/pos-printer-android/print.html';
+
+    function setStatus(t) { document.getElementById('status').textContent = t; }
+
+    function escapeHtml(s) {
+      return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    async function api(path, body) {
+      const opt = body ? {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      } : {};
+      const r = await fetch(path, opt);
+      return r.json();
+    }
+
+    function render(devices) {
+      const root = document.getElementById('list');
+      if (!devices.length) {
+        root.innerHTML = '<div style="color:var(--muted)">尚無設備。請掃描或手動新增。</div>';
+        return;
+      }
+      root.innerHTML = devices.map(d => {
+        const svc = SERVICES[d.service];
+        const pill = svc
+          ? '<span class="pill ' + svc.cls + '">' + svc.label + '</span>'
+          : '<span class="pill none">未指定</span>';
+        const raw = d.canRawPrint ? '可 raw 列印' : '無 9100';
+        return (
+          '<div class="device">' +
+          '<div><b>' + escapeHtml(d.name) + '</b> ' + pill + '</div>' +
+          '<div class="mac">IP ' + escapeHtml(d.ip) + ' · ' + raw + '</div>' +
+          '<select data-key="' + escapeHtml(d.key) + '" style="margin-top:6px">' +
+          '<option value=""' + (!d.service ? ' selected' : '') + '>未指定</option>' +
+          Object.keys(SERVICES).map(id =>
+            '<option value="' + id + '"' + (d.service === id ? ' selected' : '') + '>' +
+            SERVICES[id].label + '</option>'
+          ).join('') +
+          '</select>' +
+          '<div class="row"><button type="button" class="danger" data-remove="' +
+          escapeHtml(d.key) + '">移除</button></div></div>'
+        );
+      }).join('');
+      root.querySelectorAll('select[data-key]').forEach(sel => {
+        sel.onchange = () => api('/api/assign', {
+          key: sel.getAttribute('data-key'),
+          service: sel.value,
+        }).then(j => render(j.devices || []));
+      });
+      root.querySelectorAll('button[data-remove]').forEach(btn => {
+        btn.onclick = () => api('/api/remove', {
+          key: btn.getAttribute('data-remove'),
+        }).then(j => render(j.devices || []));
+      });
+    }
+
+    async function refresh() {
+      const s = await api('/api/status');
+      if (s.subnetPrefix && !document.getElementById('subnet').value) {
+        document.getElementById('subnet').value = s.subnetPrefix;
+      }
+      setStatus(s.scanMessage || (s.scanRunning ? '掃描中' : '就緒'));
+      render(s.devices || []);
+      return s;
+    }
+
+    document.getElementById('btnScan').onclick = async () => {
+      const prefix = document.getElementById('subnet').value.trim();
+      const j = await api('/api/scan', {
+        prefix: prefix,
+        identify: document.getElementById('identify').checked,
+      });
+      setStatus(j.message || '已開始掃描');
+    };
+    document.getElementById('btnClear').onclick = async () => {
+      if (!confirm('清除全部綁定？')) return;
+      const j = await api('/api/clear', {});
+      render(j.devices || []);
+    };
+    document.getElementById('btnAdd').onclick = async () => {
+      const j = await api('/api/manual', {
+        ip: document.getElementById('manualIp').value,
+        name: document.getElementById('manualName').value,
+        service: document.getElementById('manualService').value,
+      });
+      render(j.devices || []);
+    };
+    document.getElementById('btnDone').onclick = () => { location.href = returnUrl; };
+
+    refresh();
+    setInterval(refresh, 1500);
+  </script>
+</body>
+</html>

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- USB 打印機過濾：匹配 USB Printer Class (class=7) 嘅設備，
+     以及常見 ESC/POS 廠牌 VID。配 manifest 嘅 USB_DEVICE_ATTACHED intent-filter 用。 -->
+<resources>
+    <!-- 通用 ESC/POS：USB Printer Class -->
+    <usb-device class="7" />
+
+    <!-- 常見廠牌 VID（即使某機唔係 class 7 亦照匹配） -->
+    <usb-device vendor-id="1208" />   <!-- 0x04B8 Epson -->
+    <usb-device vendor-id="1305" />   <!-- 0x0519 Star Micronics -->
+    <usb-device vendor-id="1224" />   <!-- 0x04C8 Citizen -->
+    <usb-device vendor-id="5380" />   <!-- 0x1504 Bixolon -->
+    <usb-device vendor-id="1066" />   <!-- 0x042A Seiko (SII) -->
+    <usb-device vendor-id="1155" />   <!-- 0x0483 ST / Xprinter 等 -->
+    <usb-device vendor-id="1046" />   <!-- 0x0416 Winbond / Gprinter 佳博 -->
+    <usb-device vendor-id="6703" />   <!-- 0x1A86 QinHeng CH340/CH341 -->
+    <usb-device vendor-id="1659" />   <!-- 0x067B Prolific -->
+    <usb-device vendor-id="1027" />   <!-- 0x0403 FTDI -->
+</resources>

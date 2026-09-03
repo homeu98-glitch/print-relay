@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Macau POS</string>
+    <string name="hub_channel">Printer Hub</string>
+    <string name="hub_running">區網列印 Hub 執行中</string>
+    <string name="relay_title">雲端列印中繼</string>
+    <string name="relay_channel">Cloud Print Relay</string>
+    <string name="relay_running">雲端中繼執行中</string>
+</resources>

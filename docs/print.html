@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+  <title>POS LAN Print</title>
+  <style>
+    :root {
+      --bg: #0f1419; --panel: #1a222c; --panel2: #232d3a; --line: #334155;
+      --text: #e8eef6; --muted: #94a3b8; --ok: #34d399; --warn: #fbbf24;
+      --front: #60a5fa; --bar: #a78bfa; --kitchen: #fb923c;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; font-family: sans-serif; color: var(--text);
+      background: var(--bg); padding: 12px 12px 32px; max-width: 560px;
+    }
+    h1 { font-size: 1.15rem; margin: 0 0 4px; }
+    .hint { color: var(--muted); font-size: 0.8rem; margin: 0 0 10px; line-height: 1.4; }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--line); border-radius: 10px; padding: 10px; margin-bottom: 8px;
+    }
+    h2 { font-size: 0.92rem; margin: 0 0 6px; }
+    .row { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+    button, input, textarea {
+      font: inherit; border-radius: 8px; border: 1px solid var(--line);
+      background: var(--panel2); color: var(--text); padding: 8px 10px;
+    }
+    button { cursor: pointer; }
+    button.primary { background: #0ea5e9; border-color: #0284c7; color: #041018; font-weight: 700; }
+    button.front { border-color: rgba(96,165,250,.5); }
+    button.bar { border-color: rgba(167,139,250,.5); }
+    button.kitchen { border-color: rgba(251,146,60,.5); }
+    input, textarea { width: 100%; background: #0b1220; }
+    textarea { min-height: 80px; }
+    .svc-btns { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
+    .log {
+      background: #0b1220; border: 1px solid var(--line); border-radius: 8px;
+      height: 110px; overflow: auto; font-family: monospace; font-size: 0.72rem;
+      padding: 6px; color: #cbd5e1; margin-top: 8px;
+    }
+    .log .warn { color: var(--warn); }
+    .ok { color: var(--ok); }
+    label { display: block; color: var(--muted); font-size: 0.78rem; margin: 6px 0 4px; }
+    #scanVideo {
+      width: 100%; max-height: 260px; background: #000; border-radius: 8px; display: none;
+    }
+    #scanBox { margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <h1>POS 區網出單</h1>
+  <p class="hint">
+    手機掃描 Android 上的 QR 配對 Hub。設定印表機會跳到 Hub 網頁掃描區網並綁定；之後出單由 Hub 分送到對應印表機。
+  </p>
+
+  <div class="card">
+    <h2>配對 Printer Hub</h2>
+    <div class="row">
+      <button type="button" class="primary" id="btnScanQr">掃描 QR</button>
+      <button type="button" id="btnPickQr">選取 QR 圖片</button>
+      <button type="button" id="btnStopScan">停止掃描</button>
+    </div>
+    <input id="qrFile" type="file" accept="image/*" capture="environment" style="display:none" />
+    <div id="scanBox">
+      <video id="scanVideo" playsinline autoplay muted></video>
+    </div>
+    <label>Hub IP</label>
+    <input id="hubIp" placeholder="例如 10.1.2.10，或掃描 QR" inputmode="decimal" />
+    <label>Port</label>
+    <input id="hubPort" value="8787" inputmode="numeric" />
+    <div class="row">
+      <button type="button" id="btnSave">記住 IP</button>
+      <button type="button" class="primary" id="btnSetup">設定印表機</button>
+    </div>
+    <p class="hint ok" id="saved"></p>
+  </div>
+
+  <div class="card">
+    <h2>訊息</h2>
+    <textarea id="msg">桌號 A12｜可樂 x2｜薯條 x1</textarea>
+    <div class="svc-btns" style="margin-top:8px">
+      <button type="button" class="front" data-print="front">前台</button>
+      <button type="button" class="bar" data-print="bar">水吧</button>
+      <button type="button" class="kitchen" data-print="kitchen">廚房</button>
+    </div>
+    <div class="log" id="log"></div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+  <script>
+    const ipEl = document.getElementById('hubIp');
+    const portEl = document.getElementById('hubPort');
+    const video = document.getElementById('scanVideo');
+    const canvas = document.createElement('canvas');
+    ipEl.value = localStorage.getItem('posHubIp') || '';
+    portEl.value = localStorage.getItem('posHubPort') || '8787';
+    if (hubBase()) {
+      document.getElementById('saved').textContent = '已配對 ' + hubBase();
+    }
+
+    let scanTimer = 0;
+    let scanStream = null;
+
+    function logLine(text, warn) {
+      const box = document.getElementById('log');
+      const div = document.createElement('div');
+      const t = new Date().toLocaleTimeString('zh-TW', { hour12: false });
+      div.className = warn ? 'warn' : '';
+      div.textContent = '[' + t + '] ' + text;
+      box.prepend(div);
+    }
+
+    function hubBase() {
+      const ip = ipEl.value.trim();
+      const port = (portEl.value.trim() || '8787');
+      if (!ip) return '';
+      return 'http://' + ip + ':' + port;
+    }
+
+    function saveHub() {
+      localStorage.setItem('posHubIp', ipEl.value.trim());
+      localStorage.setItem('posHubPort', portEl.value.trim() || '8787');
+      document.getElementById('saved').textContent = '已記住 ' + (hubBase() || '(未填 IP)');
+    }
+
+    function applyPairText(raw) {
+      const text = String(raw || '').trim();
+      let ip = '';
+      let port = '8787';
+      try {
+        if (/^https?:\/\//i.test(text)) {
+          const u = new URL(text);
+          ip = u.hostname;
+          port = u.port || '8787';
+        } else if (/^poshub:\/\//i.test(text)) {
+          const rest = text.replace(/^poshub:\/\//i, '');
+          const parts = rest.split(':');
+          ip = parts[0];
+          port = parts[1] || '8787';
+        } else {
+          const m = text.match(/^(\d{1,3}(?:\.\d{1,3}){3})(?::(\d+))?$/);
+          if (m) { ip = m[1]; port = m[2] || '8787'; }
+        }
+      } catch (e) {}
+      if (!ip) {
+        logLine('QR 無法辨識：' + text, true);
+        return false;
+      }
+      ipEl.value = ip;
+      portEl.value = port;
+      saveHub();
+      logLine('已配對 ' + hubBase());
+      stopScan();
+      return true;
+    }
+
+    function tickScan() {
+      if (!scanStream) return;
+      if (typeof jsQR !== 'function') {
+        scanTimer = setTimeout(tickScan, 250);
+        return;
+      }
+      if (video.readyState >= 2) {
+        const w = video.videoWidth;
+        const h = video.videoHeight;
+        if (w && h) {
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(video, 0, 0, w, h);
+          const img = ctx.getImageData(0, 0, w, h);
+          const code = jsQR(img.data, w, h);
+          if (code && code.data) {
+            applyPairText(code.data);
+            return;
+          }
+        }
+      }
+      scanTimer = setTimeout(tickScan, 180);
+    }
+
+    async function startScan() {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        logLine('此瀏覽器無法開相機，請改選取 QR 圖片或手動輸入 IP', true);
+        return;
+      }
+      stopScan();
+      try {
+        scanStream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: 'environment' } },
+          audio: false,
+        });
+        video.srcObject = scanStream;
+        video.style.display = 'block';
+        await video.play();
+        logLine('請對準 Android Hub 上的 QR');
+        tickScan();
+      } catch (e) {
+        logLine('無法開啟相機：' + e + '。可改選取圖片或輸入 IP', true);
+      }
+    }
+
+    function stopScan() {
+      if (scanTimer) clearTimeout(scanTimer);
+      scanTimer = 0;
+      if (scanStream) {
+        scanStream.getTracks().forEach(t => t.stop());
+        scanStream = null;
+      }
+      video.srcObject = null;
+      video.style.display = 'none';
+    }
+
+    async function send(service) {
+      saveHub();
+      const base = hubBase();
+      const message = document.getElementById('msg').value;
+      if (!base) { logLine('請先掃描 QR 或填 Hub IP', true); return; }
+      if (!message.trim()) { logLine('請輸入訊息', true); return; }
+      logLine('送到 ' + service + ' → ' + base + '（' + message.length + ' 字）');
+      if (location.protocol !== 'https:') {
+        try {
+          const r = await fetch(base + '/api/print', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ service, message }),
+          });
+          const j = await r.json();
+          if (j.received || j.ok) {
+            logLine('Hub 已收到（POST）');
+            return;
+          }
+        } catch (e) {}
+      }
+      sendChunkedBeacon(base, service, message);
+    }
+
+    function chunkMessage(msg, maxEncoded) {
+      const chunks = [];
+      let cur = '';
+      for (const ch of msg) {
+        const trial = cur + ch;
+        if (encodeURIComponent(trial).length > maxEncoded) {
+          if (cur) chunks.push(cur);
+          cur = ch;
+        } else {
+          cur = trial;
+        }
+      }
+      if (cur) chunks.push(cur);
+      return chunks.length ? chunks : [''];
+    }
+
+    function sendChunkedBeacon(base, service, message) {
+      const parts = chunkMessage(message, 1400);
+      const job = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+      let left = parts.length;
+      parts.forEach((chunk, seq) => {
+        const url = base + '/beacon.png?job=' + encodeURIComponent(job) +
+          '&seq=' + seq + '&total=' + parts.length +
+          '&service=' + encodeURIComponent(service) +
+          '&chunk=' + encodeURIComponent(chunk) +
+          '&t=' + Date.now();
+        const img = new Image();
+        img.onload = img.onerror = () => {
+          left -= 1;
+          if (left === 0) logLine('Hub 已收到（請看 Android 畫面）');
+        };
+        img.referrerPolicy = 'no-referrer';
+        img.src = url;
+      });
+    }
+
+    document.getElementById('btnScanQr').onclick = startScan;
+    document.getElementById('btnStopScan').onclick = stopScan;
+    document.getElementById('btnPickQr').onclick = () => document.getElementById('qrFile').click();
+    document.getElementById('qrFile').onchange = (ev) => {
+      const file = ev.target.files && ev.target.files[0];
+      if (!file) return;
+      const img = new Image();
+      img.onload = () => {
+        canvas.width = img.width;
+        canvas.height = img.height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0);
+        if (typeof jsQR !== 'function') {
+          logLine('QR 解碼庫尚未載入，請稍後再試或手動輸入 IP', true);
+          return;
+        }
+        const data = ctx.getImageData(0, 0, img.width, img.height);
+        const code = jsQR(data.data, img.width, img.height);
+        if (code && code.data) applyPairText(code.data);
+        else logLine('圖片中找不到 QR', true);
+      };
+      img.src = URL.createObjectURL(file);
+    };
+    document.getElementById('btnSave').onclick = saveHub;
+    document.getElementById('btnSetup').onclick = () => {
+      saveHub();
+      const base = hubBase();
+      if (!base) { logLine('請先掃描 QR 或填 Hub IP', true); return; }
+      const ret = encodeURIComponent(location.href.split('#')[0]);
+      location.href = base + '/setup.html?return=' + ret;
+    };
+    document.querySelectorAll('[data-print]').forEach(btn => {
+      btn.onclick = () => send(btn.getAttribute('data-print'));
+    });
+  </script>
+</body>
+</html>
