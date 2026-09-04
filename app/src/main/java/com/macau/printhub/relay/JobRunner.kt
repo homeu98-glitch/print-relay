@@ -19,11 +19,20 @@ import org.json.JSONObject
  */
 object JobRunner {
 
-    private const val TAG = "JobRunner"
-    private const val CLAIM_LIMIT = 5
-    private const val MAX_COPIES = 5
+  private const val TAG = "JobRunner"
+  private const val CLAIM_LIMIT = 5
+  private const val MAX_COPIES = 5
 
-    data class DrainResult(val claimed: Int, val sent: Int, val failed: Int, val error: String?)
+  /**
+   * 防 org.json.optString 嘅 "null" 地雷：JSON null 值會被轉成字面字串 "null"，
+   * 而 takeIf { isNotBlank() } 擋唔住（"null" 唔係空白）。見 docs/103。
+   */
+  private fun JSONObject.optCleanString(key: String): String? {
+    if (!has(key) || isNull(key)) return null
+    return optString(key).takeIf { it.isNotBlank() && it != "null" }
+  }
+
+  data class DrainResult(val claimed: Int, val sent: Int, val failed: Int, val error: String?)
 
     suspend fun drain(
         context: Context,
@@ -120,11 +129,13 @@ object JobRunner {
         val job = PrintJobDto.fromRow(row)
         val cfg = resolvePrinter(context, prefs, row, printers)
         val label = cfg.label()
-        val kind = row.optString("kind").takeIf { it.isNotBlank() }
+        val kind = row.optString("kind").takeIf { it.isNotBlank() && it != "null" }
             ?: job.template?.kind
             ?: "kitchen"
-        val storeName = row.optString("store_name").takeIf { it.isNotBlank() } ?: prefs.storeName
-        val payment = row.optString("payment_method").takeIf { it.isNotBlank() }
+        val storeName = row.optCleanString("store_name")
+            ?: job.content?.get("store_name")?.takeIf { it.isNotBlank() && it != "null" }
+            ?: prefs.storeName
+        val payment = row.optCleanString("payment_method")
         val total = row.opt("total") as? Double ?: row.optString("total").toDoubleOrNull()
         val copies = row.optInt("copies", 1).coerceIn(1, MAX_COPIES)
 

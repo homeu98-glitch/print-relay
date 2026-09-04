@@ -41,6 +41,13 @@ suffix：`queue: "sync-queue"`、`printJobs: "print-jobs"`。
 authSession 係 `macau-pos/auth-session`。
 relay 配對係 `macau-pos-relay-{agent-id,token,store-id,store-name,paired}`（`relay-config.ts:8-12`）。
 
+### 1.6 org.json `optString` 對 JSON null 回字面 "null"（Hub 端地雷）
+Android org.json：`optString(key)` 喺值係 **JSON null** 時回**字面字串 `"null"`**（得 key 唔存在先回 `""`）。
+`.takeIf { isNotBlank() }` 擋唔住 → 直接印出 "null"。必須先 `isNull(key)` 或 `.takeIf { it != "null" }`。
+- 中招位：`JobRunner.kt:123,126,127`（kind/store_name/payment_method）、`PrintDtos.parseContent`
+- 配套根源：`/api/pos/sync` PRINT_JOB_CREATED **從不寫** `store_name`/`kind`/`payment_method`/`total`/`copies`/`ttl`/`printer`（0020 加畀 Hub 嘅欄，寫入端一直冇填）→ claim 返嚟全部 JSON null
+- 詳見 docs/103（2026-09-04）
+
 ---
 
 ## 2. macau-print-hub 約定（Android）
@@ -94,6 +101,22 @@ Network tab 嘅 `POST /api/pos/sync` 先係真相。亦即 queue 入面 synced �
 - 雲端**有**數據但**冇任何下發 API** 畀 Hub
 - `/api/pos/device-config` GET **無 store_id 過濾**（取全平台最新一條，已知坑）
 - Hub 端 `PrintJobDto.fromRow()` 連 `printer_group` 都未解析
+
+---
+
+## 4. 打印終態與 org.json 地雷（docs/101–103）
+
+### 4.1 `printed` 係 server 終態
+- Hub 印完報 `sent` → server `result/route.ts` 存 `status='printed'`。
+- `pos_claim_print_jobs` 只揀 `pending`/`failed` → `printed` 永唔會被 re-claim。
+- 重印唯一途徑：`reprintOrder` 開新 job id 再 push `PRINT_JOB_CREATED`。
+- `print-jobs/status` 對網頁映射 `printed → sent`，保持本地 UI 兼容。
+
+### 4.2 org.json `optString` 對 JSON null 回字面字串 "null"
+Android `JSONObject.optString(key)` 喺 value 為 JSON null 時會回 **String "null"**（只有 key 不存在先回 ""）。
+- 舊碼 `row.optString("store_name").takeIf { it.isNotBlank() }` 會得到 `"null"`，fallback 永遠行唔到。
+- 正確做法：先 `isNull(key)`，再 `.takeIf { it != "null" }`；Hub 已用 `optCleanString()` 統一封裝。
+- 同樣適用於所有由 Supabase 返嚟、schema 有 `null` 值嘅 text 欄：store_name / payment_method / kind 等。
 
 ---
 
